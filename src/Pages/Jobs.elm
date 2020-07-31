@@ -34,13 +34,21 @@ type alias Params =
 
 
 type alias Model =
-    { jobs : Api.Data (List Job)
+    { jobs : List Job
+    , filteredJobs : List Job
+    , filter : Filter
+    , status : Api.Data (List Job)
     }
+
+type Filter 
+    = All 
+     | Completed
+     | Discarded
 
 
 init : Url Params -> ( Model, Cmd Msg )
 init url =
-    ( Model Api.Loading
+    ( Model [] [] All Api.Loading 
     , Api.Oban.job
         { onResponse = GotObanJobs
         }
@@ -52,15 +60,26 @@ init url =
 
 type Msg
     = GotObanJobs (Api.Data (List Job))
+    | FilterChange Filter
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
+        FilterChange f ->
+            ({ model | filter = f, filteredJobs = (filterJobs f model.jobs) }, Cmd.none)
         GotObanJobs data ->
-            ( { model | jobs = data} 
-            , Cmd.none
-            )
+            case data of
+                Api.Success j ->
+                    ( { model | jobs = j, filteredJobs = j, status = data} 
+                    , Cmd.none
+                    )
+                _ ->
+                    ( { model | status = data} 
+                    , Cmd.none
+                    )
+
+                
 
 
 subscriptions : Model -> Sub Msg
@@ -75,12 +94,12 @@ subscriptions model =
 view : Model -> Document Msg
 view model =
     { title = "Jobs!"
-    , body = [viewJobs model.jobs]
+    , body = [filterBar model.filter, (viewJobs model.status model.filteredJobs)]
     }
 
-viewJobs : Api.Data (List Job) -> Element msg
-viewJobs data =
-    case data of
+viewJobs : Api.Data (List Job) -> (List Job) -> Element msg
+viewJobs status filteredJobs =
+    case status of
         Api.NotAsked ->
             text "Not asked"
 
@@ -90,8 +109,8 @@ viewJobs data =
         Api.Failure _ ->
             text "Something went wrong..."
 
-        Api.Success jobs ->
-            column [] (List.map viewJob jobs)
+        Api.Success _ ->
+            column [] (List.map viewJob filteredJobs)
 
 viewJob : Job -> Element msg
 viewJob job =
@@ -117,3 +136,38 @@ maybeLabelText label value =
             labelText label val
         Nothing ->
             none
+
+filterBar : Filter -> Element Msg
+filterBar f =
+    column [] [ el [Font.bold] (filterText f)
+    , Input.button [] {onPress = Just (FilterChange All), label = text "All"}
+    , Input.button [] {onPress = Just (FilterChange Completed), label = text "Completed"}
+    , Input.button [] {onPress = Just (FilterChange Discarded), label = text "Discarded"}
+    ]
+
+
+
+
+filterText f =
+    case f of
+        All ->
+            text "All"
+        Completed ->
+            text "Completed"
+        Discarded ->
+            text "Discarded"
+
+filterJobs : Filter -> List Job -> List Job
+filterJobs filter jobs =
+    List.filter (filterJob filter) jobs
+
+
+filterJob : Filter -> Job -> Bool
+filterJob filter job =
+    case filter of
+        Completed ->
+            job.state == "completed"
+        Discarded ->
+            job.state == "discarded"
+        All ->
+            True
